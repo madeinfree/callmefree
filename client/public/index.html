@@ -1,0 +1,152 @@
+<html>
+  <head>
+    <link
+      rel="stylesheet"
+      href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+      integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
+      crossorigin="anonymous"
+    />
+    <link
+      rel="stylesheet"
+      href="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@9.16.2/build/styles/default.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/all.min.css"
+    />
+  </head>
+  <body>
+    <div class="container">
+      <h1 class="text-center">Call Me Free</h1>
+      <div id="login-content">
+        <h3>登入使用者</h3>
+        <div>信箱<input id="email" class="form-control" type="email" /></div>
+        <div>
+          密碼<input id="password" class="form-control" type="password" />
+        </div>
+        <div><button id="submit" class="btn btn-primary">登入</button></div>
+      </div>
+      <div id="user-list-content"></div>
+    </div>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://www.unpkg.com/socket.io-client@2.3.0/dist/socket.io.js"></script>
+    <script>
+      let socket
+      const emailForm = document.querySelector('#email')
+      const passwordForm = document.querySelector('#password')
+      const submit = document.querySelector('#submit')
+      const loginContent = document.querySelector('#login-content')
+      const userListContent = document.querySelector('#user-list-content')
+      const user = {
+        id: 0,
+        name: '',
+        callNum: '0x0',
+        isLogin: false
+      }
+      const userProxy = new Proxy(user, {
+        set: (target, prop, value) => {
+          if (prop === 'name' && value !== '') {
+            socketConnect()
+          }
+          target[prop] = value
+        },
+        get: (target, prop) => {
+          return target[prop]
+        }
+      })
+      function socketConnect() {
+        socket = io('ws://localhost:52991')
+        socket.on('user leave', msg => {
+          const { name, call_num, email } = msg
+          const userList = userListContent.querySelectorAll('.user-list')
+          userList.forEach(userList => {
+            if (
+              userList.userDetail.name === name &&
+              userList.userDetail.email === email &&
+              userList.userDetail.call_num === call_num
+            ) {
+              userList.style.background = 'lavenderblush'
+            }
+          })
+        })
+        socket.on('user join', msg => {
+          const { name, call_num, email } = msg
+          const userList = userListContent.querySelectorAll('.user-list')
+          userList.forEach(userList => {
+            if (
+              userList.userDetail.name === name &&
+              userList.userDetail.email === email &&
+              userList.userDetail.call_num === call_num
+            ) {
+              userList.style.background = '#d2ffd2'
+            }
+          })
+        })
+      }
+      // submit login
+      submit.addEventListener('click', async () => {
+        try {
+          const response = await axios({
+            method: 'POST',
+            url: 'http://localhost:52991/login',
+            data: {
+              email: emailForm.value,
+              password: passwordForm.value
+            }
+          })
+          const {
+            isLogin,
+            id = null,
+            email = null,
+            name = null,
+            call_num = null
+          } = response.data
+          alert('歡迎回來')
+          userProxy.id = id
+          userProxy.email = email
+          userProxy.name = name
+          userProxy.isLogin = isLogin
+          userProxy.callNum = call_num
+          loginContent.style.display = 'none'
+          socket.emit('board', { name, email, call_num })
+          getUserList()
+        } catch (err) {
+          alert('登入失敗，請再次檢查帳號或密碼', JSON.stringify(err))
+        }
+      })
+      async function getUserList() {
+        try {
+          const response = await axios({
+            method: 'GET',
+            url: 'http://localhost:52991/users'
+          })
+          const users = response.data
+          const ulElm = document.createElement('ul')
+          ulElm.classList.add('list-group')
+          ulElm.classList.add('list-group-horizontal')
+          users.forEach(u => {
+            if (u.name === userProxy.name) return
+            const liElm = document.createElement('li')
+            liElm.classList.add('list-group-item')
+            liElm.classList.add('user-list')
+            if (u.isOnline) {
+              liElm.style.background = '#d2ffd2'
+            } else {
+              liElm.style.background = 'lavenderblush'
+            }
+            liElm.innerText = u.name
+            liElm.userDetail = {
+              email: u.email,
+              call_num: u.call_num,
+              name: u.name
+            }
+            ulElm.appendChild(liElm)
+          })
+          userListContent.appendChild(ulElm)
+        } catch (err) {
+          console.log(err)
+        }
+      }
+    </script>
+  </body>
+</html>

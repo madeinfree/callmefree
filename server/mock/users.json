@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "email": "sal95610@gmail.com",
+    "password": "123",
+    "name": "懷恩",
+    "call_num": "0xcbf1"
+  },
+  {
+    "id": 2,
+    "email": "brain@gmail.com",
+    "password": "123",
+    "name": "布萊恩",
+    "call_num": "0xcbf2"
+  },
+  {
+    "id": 3,
+    "email": "lary@gmail.com",
+    "password": "123",
+    "name": "賴瑞",
+    "call_num": "0xcbf3"
+  }
+]
