@@ -61,8 +61,11 @@
       }
       .img {
         width: 100%;
-        margin-top: 10px;
+        margin-top: 20px;
         border-radius: 5px;
+      }
+      .audio-player {
+        margin-top: 20px;
       }
     </style>
   </head>
@@ -81,8 +84,10 @@
       <h3 style="display: none;" id="user-call-state" class="text-center">
         尚未有任何通話
       </h3>
-      <span style="display: none;" id="close-connected-btn">
-        <button class="btn btn-danger">結束通話</button>
+      <span id="close-connected-btn" style="display: none;">
+        <button class="btn btn-danger">
+          結束通話
+        </button>
       </span>
       <div
         id="call-in-modal"
@@ -146,10 +151,20 @@
               for="imageUploader"
               style="cursor: pointer; font-size: 20px; margin-left: 10px; margin-bottom: 0px;"
             ></label>
+            <input
+              style="display: none;"
+              id="imageUploader"
+              type="file"
+              name="imageUploader"
+            />
             <i
-              id="phone-call"
-              class="fas fa-phone-volume"
-              for="phone-call"
+              id="remote-record"
+              class="fas fa-record-vinyl"
+              style="cursor: pointer; font-size: 20px; margin-left: 10px; margin-bottom: 0px;"
+            ></i>
+            <i
+              id="remote-phone-call"
+              class="fas fa-phone"
               style="cursor: pointer; font-size: 20px; margin-left: 10px; margin-bottom: 0px;"
             ></i>
           </div>
@@ -164,6 +179,7 @@
       <audio id="callin-audio">
         <source src="/public/callin.mp3" type="audio/mp3" />
       </audio>
+      <audio id="callin-phone"></audio>
     </div>
     <script src="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@9.16.2/build/highlight.min.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
@@ -186,6 +202,7 @@
         name: '',
         connected: false
       }
+      let phoneCallStream = null
       const emailForm = document.querySelector('#email')
       const passwordForm = document.querySelector('#password')
       const submit = document.querySelector('#submit')
@@ -197,6 +214,7 @@
 
       // Incomming Call
       const callinAudio = $('#callin-audio')[0]
+      const callinPhone = $('#callin-phone')[0]
 
       // Message board
       const chatBorder = $('#chat')
@@ -204,6 +222,10 @@
       const messageInp = $('#messageInp')
       const fileUploader = $('#fileUploader')
       const imageUploader = $('#imageUploader')
+
+      // Remote Call
+      const remoteRecord = $('#remote-record')
+      const remotePhoneCall = $('#remote-phone-call')
 
       const user = {
         id: 0,
@@ -223,7 +245,7 @@
         }
       })
       function socketConnect() {
-        socket = io('ws://localhost:52991')
+        socket = io('wss://4f39f6a4.ngrok.io')
         socket.on('user leave', msg => {
           const { name, call_num, email } = msg
           const userList = userListContent.querySelectorAll('.user-list')
@@ -249,6 +271,11 @@
               userList.style.background = '#d2ffd2'
             }
           })
+        })
+        socket.on('PC:close call', msg => {
+          if (pc) {
+            pc.close()
+          }
         })
         socket.on('user call in', msg => {
           if (caller.connected) return
@@ -285,6 +312,12 @@
             negotiated: true,
             id: 0
           })
+          pc.ontrack = e => {
+            if (callinPhone.srcObject !== e.streams[0]) {
+              callinPhone.srcObject = e.streams[0]
+            }
+            callinPhone.play()
+          }
           dataChannel.onopen = e => {
             console.log('Channel is open')
             dataChannel.send('已連線開始聊天吧...')
@@ -292,6 +325,7 @@
           }
           dataChannel.onclose = e => {
             if (e.type == 'close') {
+              socket.emit('close call', caller)
               caller.name = ''
               caller.call_num = ''
               caller.connected = false
@@ -300,6 +334,9 @@
                 display: 'none'
               })
               chatBorder.html('')
+              if (phoneCallStream.getAudioTracks().length) {
+                phoneCallStream.getAudioTracks().forEach(track => track.stop())
+              }
             }
           }
           dataChannel.addEventListener('message', e => {
@@ -323,13 +360,29 @@
             }
           })
           await pc.setRemoteDescription(offer)
-          const answer = await pc.createAnswer()
-          await pc.setLocalDescription(answer)
-          socket.emit('PC:send answer to offer', {
-            answer,
-            name: name,
-            call_num
-          })
+          const constraints = { audio: true }
+          navigator.mediaDevices
+            .getUserMedia(constraints)
+            .then(async function(stream) {
+              phoneCallStream = stream
+              const audioTracks = phoneCallStream.getAudioTracks()
+              if (audioTracks.length > 0) {
+                console.log(`Using Audio device: ${audioTracks[0].label}`)
+              }
+              phoneCallStream
+                .getTracks()
+                .forEach(track => pc.addTrack(track, phoneCallStream))
+              const answer = await pc.createAnswer({
+                answerToReceiveAudio: 1,
+                answerToReceiveVideo: 0
+              })
+              await pc.setLocalDescription(answer)
+              socket.emit('PC:send answer to offer', {
+                answer,
+                name: name,
+                call_num
+              })
+            })
         })
         socket.on('PC:get candidate', msg => {
           const { candidate, name, call_num } = msg
@@ -341,7 +394,7 @@
         try {
           const response = await axios({
             method: 'POST',
-            url: 'http://localhost:52991/login',
+            url: 'https://4f39f6a4.ngrok.io/login',
             data: {
               email: emailForm.value,
               password: passwordForm.value
@@ -373,7 +426,7 @@
         try {
           const response = await axios({
             method: 'GET',
-            url: 'http://localhost:52991/users'
+            url: 'https://4f39f6a4.ngrok.io/users'
           })
           const users = response.data
           const ulElm = document.createElement('ul')
@@ -427,6 +480,9 @@
           negotiated: true,
           id: 0
         })
+        pc.ontrack = e => {
+          console.log(e)
+        }
         dataChannel.onopen = e => {
           console.log('Channel is open')
           caller.connected = true
@@ -436,6 +492,7 @@
         }
         dataChannel.onclose = e => {
           if (e.type == 'close') {
+            socket.emit('close call', caller)
             caller.name = ''
             caller.call_num = ''
             caller.connected = false
@@ -444,6 +501,9 @@
               display: 'none'
             })
             chatBorder.html('')
+            if (phoneCallStream.getAudioTracks().length) {
+              phoneCallStream.getAudioTracks().forEach(track => track.stop())
+            }
           }
         }
         dataChannel.addEventListener('message', e => {
@@ -462,18 +522,31 @@
         })
         pc.addEventListener('negotiationneeded', async () => {
           console.log('--- 建立 offer description ---')
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: 0,
-            offerToReceiveVideo: 0
-          })
-          console.log('--- 配置 local description ---')
-          await pc.setLocalDescription(offer)
-          console.log('--- 傳送 offer 至 answer ---')
-          socket.emit('PC:send offer to answer', {
-            offer,
-            name: caller,
-            call_num
-          })
+          const constraints = { audio: true }
+          navigator.mediaDevices
+            .getUserMedia(constraints)
+            .then(async function(stream) {
+              phoneCallStream = stream
+              const audioTracks = phoneCallStream.getAudioTracks()
+              if (audioTracks.length > 0) {
+                console.log(`Using Audio device: ${audioTracks[0].label}`)
+              }
+              phoneCallStream
+                .getTracks()
+                .forEach(track => pc.addTrack(track, phoneCallStream))
+              const offer = await pc.createOffer({
+                offerToReceiveAudio: 1,
+                offerToReceiveVideo: 0
+              })
+              console.log('--- 配置 local description ---')
+              await pc.setLocalDescription(offer)
+              console.log('--- 傳送 offer 至 answer ---')
+              socket.emit('PC:send offer to answer', {
+                offer,
+                name: caller,
+                call_num
+              })
+            })
         })
       }
       async function offerConnectToAnswer(name, call_num, answer) {
@@ -522,11 +595,129 @@
           }
           return
         }
+        if (action === 'recordUploadData') {
+          const data = Uint8Array.from(chunk.split(','))
+          buf.set(data, count)
+          count += data.byteLength
+          if (count === buf.byteLength) {
+            const blob = new Blob([buf], { type: 'audio/ogg' })
+            const blobUrl = URL.createObjectURL(blob)
+            const audio = document.createElement('audio')
+            audio.className = 'audio-player'
+            audio.controls = 'controls'
+            audio.src = blobUrl
+            chatBorder.append(audio)
+            chatBorder.scrollTop(999999)
+          }
+          return
+        }
+        const context = new AudioContext()
+        if (action === 'phoneCallUploadData') {
+          const data = Uint8Array.from(chunk.split(','))
+          var source = context.createBufferSource()
+          blob.arrayBuffer().then(arrayBuffer => {
+            console.log(arrayBuffer)
+            context.decodeAudioData(arrayBuffer, function(buffer) {
+              console.log(buffer)
+              source.buffer = arrayBuffer
+              context.createBufferSourcesource.connect(context.destination)
+              source.start(0)
+            })
+          })
+          return
+        }
         list.classList.add('list')
         list.innerText = message
         chatBorder.append(list)
         chatBorder.scrollTop(999999)
       }
+      /**
+       * 開始傳送錄音，必須啟動麥克風權限
+       */
+      let recordOn = false,
+        recordStream = null,
+        mediaRecorder = null
+      remoteRecord.on('click', () => {
+        if (recordOn) {
+          recordStream.getAudioTracks()[0].stop()
+          recordOn = false
+          mediaRecorder.stop()
+          return
+        }
+        if (!caller.connected) return
+        const constraints = { audio: true }
+        navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
+          recordStream = stream
+          recordOn = true
+          var mr = new MediaRecorder(stream)
+          mediaRecorder = mr
+          mr.start()
+          mr.ondataavailable = async e => {
+            const blob = e.data
+            const buffer = await blob.arrayBuffer()
+            const uint8read = new Uint8Array(buffer)
+            dataChannel.send(`UploadRequest::${blob.size}`)
+            const CHUNK_MAX_LENGTH = 10240
+            const chunksCount = uint8read.byteLength / CHUNK_MAX_LENGTH
+            for (var i = 0; i < chunksCount; i++) {
+              const start = i * CHUNK_MAX_LENGTH
+              const end = (i + 1) * CHUNK_MAX_LENGTH
+              dataChannel.send(
+                `recordUploadData::${uint8read.subarray(start, end)}`
+              )
+            }
+          }
+        })
+      })
+      /**
+       * 直接傳送說話
+       * */
+      let phoneCallOn = false
+      remotePhoneCall.on('click', () => {
+        if (recordOn && phoneCallOn) return
+        if (!caller.connected) return
+        if (phoneCallOn) {
+          phoneCallStream.getAudioTracks()[0].stop()
+          phoneCallOn = false
+          return
+        }
+        phoneCallOn = true
+        const constraints = { audio: true }
+        navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
+          // phoneCallStream = stream
+          // const audioTracks = phoneCallStream.getAudioTracks()
+          // if (audioTracks.length > 0) {
+          //   console.log(`Using Audio device: ${audioTracks[0].label}`)
+          // }
+          // phoneCallStream
+          //   .getTracks()
+          //   .forEach(track => pc.addTrack(track, phoneCallStream))
+          // const audioContext = new AudioContext()
+          // const channels = 2
+          // const frameCount = audioContext.sampleRate * 2.0
+          // const analyser = audioContext.createAnalyser()
+          // analyser.fftSize = 1024
+          // const bufferLength = analyser.frequencyBinCount
+          // const dataArray = new Uint8Array(bufferLength)
+          // const mediaStreamSource = audioContext.createMediaStreamSource(stream)
+          // mediaStreamSource.connect(analyser)
+          function getRecord() {
+            // const myArrayBuffer = audioContext.createBuffer(
+            //   2,
+            //   frameCount,
+            //   audioContext.sampleRate
+            // )
+            // var source = audioContext.createBufferSource()
+            // source.buffer = myArrayBuffer
+            // source.connect(audioContext.destination)
+            // source.start()
+            // analyser.getByteFrequencyData(dataArray)
+            // dataChannel.send(`phoneCallUploadData::${dataArray}`)
+            // if (phoneCallOn) requestAnimationFrame(getRecord)
+          }
+          // requestAnimationFrame(getRecord)
+        })
+      })
       sendBtn.on('click', () => {
         if (!caller.connected) return
         const message = messageInp.val()
@@ -581,12 +772,20 @@
         // 斷開連線
         closeConnectedBtn.css({ display: 'block' }).one('click', () => {
           pc.close()
+          if (phoneCallOn) {
+            phoneCallOn = false
+            phoneCallStream.getAudioTracks()[0].stop()
+          }
         })
       }
       function calleeConnectedView() {
         userCallState.text(`與${caller.name}(${caller.call_num})通話中`)
         closeConnectedBtn.css({ display: 'block' }).one('click', () => {
           pc.close()
+          if (phoneCallOn) {
+            phoneCallOn = false
+            phoneCallStream.getAudioTracks()[0].stop()
+          }
         })
       }
     </script>

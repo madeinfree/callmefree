@@ -174,6 +174,19 @@ io.on('connection', socket => {
       })
     }
   })
+  socket.on('close call', msg => {
+    const { name, call_num } = msg
+    const answerUser = onlineUsers[hashKey]
+    let user = null
+    for (let key in onlineUsers) {
+      if (onlineUsers[key].call_num === call_num) {
+        user = onlineUsers[key]
+      }
+    }
+    if (user) {
+      user.socket.emit('PC:close call')
+    }
+  })
   socket.on('disconnect', reason => {
     if (onlineUsers[hashKey]) {
       socket.broadcast.emit('user leave', {
