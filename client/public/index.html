@@ -14,6 +14,57 @@
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/all.min.css"
     />
+    <style>
+      #chat {
+        height: 400px;
+        overflow: auto;
+        padding: 20px;
+        /* padding-bottom: 115px; */
+      }
+      #d {
+        height: 100px;
+      }
+      #d:after {
+        content: '';
+        display: inline-block;
+        height: 255px;
+        width: px;
+      }
+
+      #d div {
+        display: inline-block;
+        width: 2px;
+        background: #a00;
+        margin: 0 0 0 1px;
+        vertical-align: bottom;
+      }
+      .list {
+        background-color: #fdeecf;
+        border-radius: 5px;
+        padding: 20px;
+        margin-top: 20px;
+      }
+      .list-self {
+        background-color: rgb(237, 237, 237);
+        border-radius: 5px;
+        padding: 20px;
+        margin-top: 20px;
+      }
+      .hljs {
+        margin-top: 20px;
+        border-radius: 5px;
+        padding: 20px;
+      }
+      #operator {
+        position: fixed;
+        bottom: 0;
+      }
+      .img {
+        width: 100%;
+        margin-top: 10px;
+        border-radius: 5px;
+      }
+    </style>
   </head>
   <body>
     <div class="container">
@@ -72,6 +123,45 @@
         </div>
       </div>
     </div>
+    <div id="chat"></div>
+    <div>
+      <div style="background-color: white; width: 100%;" id="operator">
+        <div>
+          <div
+            style="background-color: rgba(255, 205, 184, 0.543); padding: 5 20;"
+          >
+            <label
+              class="fas fa-file-upload"
+              for="fileUploader"
+              style="cursor: pointer; font-size: 20px; margin-bottom: 0px;"
+            ></label>
+            <input
+              style="display: none;"
+              id="fileUploader"
+              type="file"
+              name="fileUploader"
+            />
+            <label
+              class="fas fa-image"
+              for="imageUploader"
+              style="cursor: pointer; font-size: 20px; margin-left: 10px; margin-bottom: 0px;"
+            ></label>
+            <input
+              style="display: none;"
+              id="imageUploader"
+              type="file"
+              name="fileUploader"
+            />
+          </div>
+        </div>
+        <div style="padding: 20px; display: flex;">
+          <input id="messageInp" class="form-control" type="text" />
+          <button style="width: 100px;" class="btn btn-primary" id="sendBtn">
+            發話
+          </button>
+        </div>
+      </div>
+    </div>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
     <script src="https://unpkg.com/jquery@3.3.1/dist/jquery.min.js"></script>
     <script
@@ -100,6 +190,12 @@
       const userCallState = $('#user-call-state')
       const closeConnectedBtn = $('#close-connected-btn')
       const onCallBtn = $('#on-call-btn')
+
+      // Message board
+      const chatBorder = $('#chat')
+      const sendBtn = $('#sendBtn')
+      const messageInp = $('#messageInp')
+
       const user = {
         id: 0,
         name: '',
@@ -185,6 +281,7 @@
               closeConnectedBtn.css({
                 display: 'none'
               })
+              chatBorder.html('')
             }
           }
           dataChannel.addEventListener('message', e => {
@@ -195,6 +292,7 @@
               caller.connected = true
               $('#call-in-modal').modal('hide')
             }
+            handleMessage(e)
           })
           pc.addEventListener('iceconnectionstatechange', e => {})
           pc.addEventListener('icecandidate', async e => {
@@ -328,10 +426,11 @@
             closeConnectedBtn.css({
               display: 'none'
             })
+            chatBorder.html('')
           }
         }
         dataChannel.addEventListener('message', e => {
-          console.log(e)
+          handleMessage(e)
         })
         console.log('--- 開始建立連線 ---')
         pc.addEventListener('iceconnectionstatechange', e => {})
@@ -363,7 +462,61 @@
       async function offerConnectToAnswer(name, call_num, answer) {
         await pc.setRemoteDescription(answer)
       }
-
+      async function handleMessage(e) {
+        const message = e.data
+        const list = document.createElement('div')
+        const cutAction = message.split('::')
+        const action = cutAction[0]
+        const chunk = cutAction[1]
+        if (action === 'UploadRequest') {
+          buf = new Uint8ClampedArray(parseInt(chunk, 10))
+          count = 0
+          return
+        }
+        if (action === 'fileUploadData') {
+          const data = Uint8Array.from(chunk.split(','))
+          buf.set(data, count)
+          count += data.byteLength
+          if (count === buf.byteLength) {
+            const text = new TextDecoder('utf-8').decode(buf)
+            list.innerHTML = `<pre>${text}</pre>`
+            chatBorder.append(list)
+            hljs.highlightBlock(list)
+          }
+          return
+        }
+        if (action === 'imageUploadData') {
+          const data = Uint8ClampedArray.from(chunk.split(','))
+          buf.set(data, count)
+          count += data.byteLength
+          if (count === buf.byteLength) {
+            const TYPED_ARRAY = new Uint8Array(buf)
+            const STRING_CHAR = TYPED_ARRAY.reduce((data, byte) => {
+              return data + String.fromCharCode(byte)
+            }, '')
+            const base64String = btoa(STRING_CHAR)
+            const imgUrl = 'data:image/jpg;base64, ' + base64String
+            const img = document.createElement('img')
+            img.classList.add('img')
+            img.src = imgUrl
+            chatBorder.append(img)
+          }
+          return
+        }
+        list.classList.add('list')
+        list.innerText = message
+        chatBorder.append(list)
+      }
+      sendBtn.on('click', () => {
+        if (!caller.connected) return
+        const message = messageInp.val()
+        dataChannel.send(message)
+        const list = document.createElement('div')
+        list.classList.add('list-self')
+        list.innerText = message
+        chatBorder.append(list)
+        chatBorder.scrollTop(9999)
+      })
       // 連接後的畫面
       function callerConnectedView() {
         userCallState.text(`與${caller.name}(${caller.call_num})通話中`)
