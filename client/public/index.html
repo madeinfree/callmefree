@@ -81,9 +81,9 @@
       <h3 style="display: none;" id="user-call-state" class="text-center">
         尚未有任何通話
       </h3>
-      <div style="display: none;" id="close-connected-btn">
+      <span style="display: none;" id="close-connected-btn">
         <button class="btn btn-danger">結束通話</button>
-      </div>
+      </span>
       <div
         id="call-in-modal"
         class="modal fade bd-example-modal-sm"
@@ -146,12 +146,12 @@
               for="imageUploader"
               style="cursor: pointer; font-size: 20px; margin-left: 10px; margin-bottom: 0px;"
             ></label>
-            <input
-              style="display: none;"
-              id="imageUploader"
-              type="file"
-              name="fileUploader"
-            />
+            <i
+              id="phone-call"
+              class="fas fa-phone-volume"
+              for="phone-call"
+              style="cursor: pointer; font-size: 20px; margin-left: 10px; margin-bottom: 0px;"
+            ></i>
           </div>
         </div>
         <div style="padding: 20px; display: flex;">
@@ -161,7 +161,11 @@
           </button>
         </div>
       </div>
+      <audio id="callin-audio">
+        <source src="/public/callin.mp3" type="audio/mp3" />
+      </audio>
     </div>
+    <script src="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@9.16.2/build/highlight.min.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
     <script src="https://unpkg.com/jquery@3.3.1/dist/jquery.min.js"></script>
     <script
@@ -191,10 +195,15 @@
       const closeConnectedBtn = $('#close-connected-btn')
       const onCallBtn = $('#on-call-btn')
 
+      // Incomming Call
+      const callinAudio = $('#callin-audio')[0]
+
       // Message board
       const chatBorder = $('#chat')
       const sendBtn = $('#sendBtn')
       const messageInp = $('#messageInp')
+      const fileUploader = $('#fileUploader')
+      const imageUploader = $('#imageUploader')
 
       const user = {
         id: 0,
@@ -250,8 +259,17 @@
             有一通來自${caller.name}的通話請求
             `)
           $('#call-in-modal').modal('show')
+          let timer = null
+          callinAudio.play()
+          timer = setInterval(() => {
+            callinAudio.play()
+          }, 3000)
           onCallBtn.one('click', () => {
+            clearInterval(timer)
             socket.emit('allow answer', caller)
+          })
+          $('#call-in-modal').one('hidden.bs.modal', function(e) {
+            clearInterval(timer)
           })
         })
         socket.on('notify:user wait from offer', msg => {
@@ -379,8 +397,7 @@
               name: u.name
             }
             liElm.addEventListener('click', () => {
-              const callOrNot = confirm(`是否撥打給${u.name} ?`)
-              if (callOrNot && !caller.connected) {
+              if (!caller.connected) {
                 answerAllowCall(userProxy.callNum, u.call_num)
               } else {
                 alert('正在通話中')
@@ -482,6 +499,7 @@
             list.innerHTML = `<pre>${text}</pre>`
             chatBorder.append(list)
             hljs.highlightBlock(list)
+            chatBorder.scrollTop(999999)
           }
           return
         }
@@ -500,12 +518,14 @@
             img.classList.add('img')
             img.src = imgUrl
             chatBorder.append(img)
+            chatBorder.scrollTop(999999)
           }
           return
         }
         list.classList.add('list')
         list.innerText = message
         chatBorder.append(list)
+        chatBorder.scrollTop(999999)
       }
       sendBtn.on('click', () => {
         if (!caller.connected) return
@@ -515,7 +535,45 @@
         list.classList.add('list-self')
         list.innerText = message
         chatBorder.append(list)
-        chatBorder.scrollTop(9999)
+        chatBorder.scrollTop(999999)
+      })
+      fileUploader.on('change', e => {
+        const file = e.target.files[0]
+        const fileReader = new FileReader()
+        const blob = new Blob([file])
+        fileReader.readAsArrayBuffer(blob)
+        fileReader.addEventListener('load', e => {
+          const uint8read = new Uint8Array(e.target.result)
+          dataChannel.send(`UploadRequest::${uint8read.byteLength}`)
+          const CHUNK_MAX_LENGTH = 10240
+          const chunksCount = uint8read.byteLength / CHUNK_MAX_LENGTH
+          for (var i = 0; i < chunksCount; i++) {
+            const start = i * CHUNK_MAX_LENGTH
+            const end = (i + 1) * CHUNK_MAX_LENGTH
+            dataChannel.send(
+              `fileUploadData::${uint8read.subarray(start, end)}`
+            )
+          }
+        })
+      })
+      imageUploader.on('change', e => {
+        const file = e.target.files[0]
+        const fileReader = new FileReader()
+        const blob = new Blob([file])
+        fileReader.readAsArrayBuffer(blob)
+        fileReader.addEventListener('load', e => {
+          const uint8read = new Uint8Array(e.target.result)
+          dataChannel.send(`UploadRequest::${uint8read.byteLength}`)
+          const CHUNK_MAX_LENGTH = 10240
+          const chunksCount = uint8read.byteLength / CHUNK_MAX_LENGTH
+          for (var i = 0; i < chunksCount; i++) {
+            const start = i * CHUNK_MAX_LENGTH
+            const end = (i + 1) * CHUNK_MAX_LENGTH
+            dataChannel.send(
+              `imageUploadData::${uint8read.subarray(start, end)}`
+            )
+          }
+        })
       })
       // 連接後的畫面
       function callerConnectedView() {
