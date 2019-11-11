@@ -27,16 +27,79 @@
         <div><button id="submit" class="btn btn-primary">登入</button></div>
       </div>
       <div id="user-list-content"></div>
+      <h3 style="display: none;" id="user-call-state" class="text-center">
+        尚未有任何通話
+      </h3>
+      <div style="display: none;" id="close-connected-btn">
+        <button class="btn btn-danger">結束通話</button>
+      </div>
+      <div
+        id="call-in-modal"
+        class="modal fade bd-example-modal-sm"
+        tabindex="-1"
+        role="dialog"
+        aria-labelledby="call-in-modal-label"
+      >
+        <div class="modal-dialog modal-sm">
+          <div class="modal-content">
+            <div
+              style="display: flex; justify-content: space-around; padding: 10px;"
+            >
+              <div id="call-from-content"></div>
+              <div>
+                <span style="cursor: pointer;" id="on-call-btn">接聽</span> |
+                <span>取消</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        id="call-out-modal"
+        class="modal fade bd-example-modal-sm"
+        tabindex="-1"
+        role="dialog"
+        aria-labelledby="call-out-modal-label"
+      >
+        <div class="modal-dialog modal-sm">
+          <div class="modal-content">
+            <div
+              style="display: flex; justify-content: space-around; padding: 10px;"
+            >
+              <div>撥號中...</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/jquery@3.3.1/dist/jquery.min.js"></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"
+      integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"
+      integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM"
+      crossorigin="anonymous"
+    ></script>
     <script src="https://www.unpkg.com/socket.io-client@2.3.0/dist/socket.io.js"></script>
     <script>
-      let socket
+      let socket, pc, dataChannel
+      let caller = {
+        call_num: '',
+        name: '',
+        connected: false
+      }
       const emailForm = document.querySelector('#email')
       const passwordForm = document.querySelector('#password')
       const submit = document.querySelector('#submit')
       const loginContent = document.querySelector('#login-content')
       const userListContent = document.querySelector('#user-list-content')
+      const userCallState = $('#user-call-state')
+      const closeConnectedBtn = $('#close-connected-btn')
+      const onCallBtn = $('#on-call-btn')
       const user = {
         id: 0,
         name: '',
@@ -82,6 +145,80 @@
             }
           })
         })
+        socket.on('user call in', msg => {
+          if (caller.connected) return
+          const content = $('#call-in-modal #call-from-content')
+          caller.call_num = msg.call_num
+          caller.name = msg.name
+          content.text(`
+            有一通來自${caller.name}的通話請求
+            `)
+          $('#call-in-modal').modal('show')
+          onCallBtn.one('click', () => {
+            socket.emit('allow answer', caller)
+          })
+        })
+        socket.on('notify:user wait from offer', msg => {
+          createPCConnect(msg.name, msg.call_num)
+        })
+        socket.on('notify:user wait from answer', msg => {
+          offerConnectToAnswer(msg.name, msg.call_num, msg.answer)
+        })
+        socket.on('PC:get caller offer', async msg => {
+          const { offer, name, call_num } = msg
+          pc = new RTCPeerConnection()
+          dataChannel = pc.createDataChannel('chat', {
+            negotiated: true,
+            id: 0
+          })
+          dataChannel.onopen = e => {
+            console.log('Channel is open')
+            dataChannel.send('已連線開始聊天吧...')
+            calleeConnectedView()
+          }
+          dataChannel.onclose = e => {
+            if (e.type == 'close') {
+              caller.name = ''
+              caller.call_num = ''
+              caller.connected = false
+              userCallState.text('尚未有任何通話')
+              closeConnectedBtn.css({
+                display: 'none'
+              })
+            }
+          }
+          dataChannel.addEventListener('message', e => {
+            const { data } = e
+            if (data === '已連線開始聊天吧...') {
+              caller.call_num = call_num
+              caller.name = name
+              caller.connected = true
+              $('#call-in-modal').modal('hide')
+            }
+          })
+          pc.addEventListener('iceconnectionstatechange', e => {})
+          pc.addEventListener('icecandidate', async e => {
+            if (e.candidate) {
+              socket.emit('PC:send candidate to offer', {
+                candidate: e.candidate,
+                name,
+                call_num
+              })
+            }
+          })
+          await pc.setRemoteDescription(offer)
+          const answer = await pc.createAnswer()
+          await pc.setLocalDescription(answer)
+          socket.emit('PC:send answer to offer', {
+            answer,
+            name: name,
+            call_num
+          })
+        })
+        socket.on('PC:get candidate', msg => {
+          const { candidate, name, call_num } = msg
+          pc.addIceCandidate(candidate)
+        })
       }
       // submit login
       submit.addEventListener('click', async () => {
@@ -101,7 +238,9 @@
             name = null,
             call_num = null
           } = response.data
-          alert('歡迎回來')
+          userCallState.css({
+            display: 'block'
+          })
           userProxy.id = id
           userProxy.email = email
           userProxy.name = name
@@ -129,6 +268,7 @@
             const liElm = document.createElement('li')
             liElm.classList.add('list-group-item')
             liElm.classList.add('user-list')
+            liElm.style.cursor = 'pointer'
             if (u.isOnline) {
               liElm.style.background = '#d2ffd2'
             } else {
@@ -140,12 +280,103 @@
               call_num: u.call_num,
               name: u.name
             }
+            liElm.addEventListener('click', () => {
+              const callOrNot = confirm(`是否撥打給${u.name} ?`)
+              if (callOrNot && !caller.connected) {
+                answerAllowCall(userProxy.callNum, u.call_num)
+              } else {
+                alert('正在通話中')
+              }
+            })
             ulElm.appendChild(liElm)
           })
           userListContent.appendChild(ulElm)
         } catch (err) {
           console.log(err)
         }
+      }
+      // 詢問對方是否接通
+      function answerAllowCall(caller, call_num) {
+        $('#call-out-modal').modal('show')
+        socket.emit('call user allow check', {
+          caller,
+          callee: call_num
+        })
+      }
+      // WebRTC creater function
+      function createPCConnect(name, call_num) {
+        caller.call_num = call_num
+        caller.name = name
+        pc = new RTCPeerConnection()
+        dataChannel = pc.createDataChannel('chat', {
+          negotiated: true,
+          id: 0
+        })
+        dataChannel.onopen = e => {
+          console.log('Channel is open')
+          caller.connected = true
+          dataChannel.send('已連線開始聊天吧...')
+          $('#call-out-modal').modal('hide')
+          callerConnectedView()
+        }
+        dataChannel.onclose = e => {
+          if (e.type == 'close') {
+            caller.name = ''
+            caller.call_num = ''
+            caller.connected = false
+            userCallState.text('尚未有任何通話')
+            closeConnectedBtn.css({
+              display: 'none'
+            })
+          }
+        }
+        dataChannel.addEventListener('message', e => {
+          console.log(e)
+        })
+        console.log('--- 開始建立連線 ---')
+        pc.addEventListener('iceconnectionstatechange', e => {})
+        pc.addEventListener('icecandidate', async e => {
+          if (e.candidate) {
+            socket.emit('PC:send candidate to answer', {
+              candidate: e.candidate,
+              name,
+              call_num
+            })
+          }
+        })
+        pc.addEventListener('negotiationneeded', async () => {
+          console.log('--- 建立 offer description ---')
+          const offer = await pc.createOffer({
+            offerToReceiveAudio: 0,
+            offerToReceiveVideo: 0
+          })
+          console.log('--- 配置 local description ---')
+          await pc.setLocalDescription(offer)
+          console.log('--- 傳送 offer 至 answer ---')
+          socket.emit('PC:send offer to answer', {
+            offer,
+            name: caller,
+            call_num
+          })
+        })
+      }
+      async function offerConnectToAnswer(name, call_num, answer) {
+        await pc.setRemoteDescription(answer)
+      }
+
+      // 連接後的畫面
+      function callerConnectedView() {
+        userCallState.text(`與${caller.name}(${caller.call_num})通話中`)
+        // 斷開連線
+        closeConnectedBtn.css({ display: 'block' }).one('click', () => {
+          pc.close()
+        })
+      }
+      function calleeConnectedView() {
+        userCallState.text(`與${caller.name}(${caller.call_num})通話中`)
+        closeConnectedBtn.css({ display: 'block' }).one('click', () => {
+          pc.close()
+        })
       }
     </script>
   </body>

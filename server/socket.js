@@ -64,10 +64,6 @@ io.on('connection', socket => {
   }
   // 登入記錄
   socket.on('board', msg => {
-    const hashKey = crypto
-      .createHash('sha1')
-      .update(socket.id)
-      .digest('hex')
     onlineUsers[hashKey].email = msg.email
     onlineUsers[hashKey].name = msg.name
     onlineUsers[hashKey].call_num = msg.call_num
@@ -77,11 +73,108 @@ io.on('connection', socket => {
       call_num: onlineUsers[hashKey].call_num
     })
   })
+  // 替使用者撥打電話
+  socket.on('call user allow check', msg => {
+    const { caller, callee } = msg
+    const callerUser = onlineUsers[hashKey]
+    let calleeUser = null
+    for (let key in onlineUsers) {
+      if (onlineUsers[key].call_num === callee) {
+        calleeUser = onlineUsers[key]
+      }
+    }
+    if (calleeUser) {
+      calleeUser.socket.emit('user call in', {
+        name: callerUser.name,
+        call_num: callerUser.call_num
+      })
+    }
+  })
+  socket.on('allow answer', msg => {
+    const { name, call_num } = msg
+    const answerUser = onlineUsers[hashKey]
+    let offerUser = null
+    for (let key in onlineUsers) {
+      if (onlineUsers[key].call_num === call_num) {
+        offerUser = onlineUsers[key]
+      }
+    }
+    if (offerUser) {
+      offerUser.socket.emit('notify:user wait from offer', {
+        name: answerUser.name,
+        call_num: answerUser.call_num
+      })
+    }
+  })
+  socket.on('PC:send offer to answer', msg => {
+    const { offer, name, call_num } = msg
+    const callerUser = onlineUsers[hashKey]
+    let calleeUser = null
+    for (let key in onlineUsers) {
+      if (onlineUsers[key].call_num === call_num) {
+        calleeUser = onlineUsers[key]
+      }
+    }
+    if (calleeUser) {
+      calleeUser.socket.emit('PC:get caller offer', {
+        name: callerUser.name,
+        call_num: callerUser.call_num,
+        offer
+      })
+    }
+  })
+  socket.on('PC:send answer to offer', msg => {
+    const { answer, name, call_num } = msg
+    const answerUser = onlineUsers[hashKey]
+    let offerUser = null
+    for (let key in onlineUsers) {
+      if (onlineUsers[key].call_num === call_num) {
+        offerUser = onlineUsers[key]
+      }
+    }
+    if (offerUser) {
+      offerUser.socket.emit('notify:user wait from answer', {
+        name: answerUser.name,
+        call_num: answerUser.call_num,
+        answer
+      })
+    }
+  })
+  socket.on('PC:send candidate to answer', msg => {
+    const { candidate, name, call_num } = msg
+    const callerUser = onlineUsers[hashKey]
+    let calleeUser = null
+    for (let key in onlineUsers) {
+      if (onlineUsers[key].call_num === call_num) {
+        calleeUser = onlineUsers[key]
+      }
+    }
+    if (calleeUser) {
+      calleeUser.socket.emit('PC:get candidate', {
+        name: callerUser.name,
+        call_num: callerUser.call_num,
+        candidate
+      })
+    }
+  })
+  socket.on('PC:send candidate to offer', msg => {
+    const { candidate, name, call_num } = msg
+    const answerUser = onlineUsers[hashKey]
+    let offerUser = null
+    for (let key in onlineUsers) {
+      if (onlineUsers[key].call_num === call_num) {
+        offerUser = onlineUsers[key]
+      }
+    }
+    if (offerUser) {
+      offerUser.socket.emit('PC:get candidate', {
+        name: answerUser.name,
+        call_num: answerUser.call_num,
+        candidate
+      })
+    }
+  })
   socket.on('disconnect', reason => {
-    const hashKey = crypto
-      .createHash('sha1')
-      .update(socket.id)
-      .digest('hex')
     if (onlineUsers[hashKey]) {
       socket.broadcast.emit('user leave', {
         email: onlineUsers[hashKey].email,
