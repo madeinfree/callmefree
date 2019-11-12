@@ -138,7 +138,7 @@
       </div>
     </div>
     <div id="chat"></div>
-    <video id="callin-video"></video>
+    <video id="callin-video" style="display: none;"></video>
     <div>
       <div style="background-color: white; width: 100%;" id="operator">
         <div>
@@ -173,8 +173,8 @@
               style="cursor: pointer; font-size: 20px; margin-left: 10px; margin-bottom: 0px;"
             ></i>
             <i
-              id="remote-phone-call"
-              class="fas fa-phone"
+              id="share-square"
+              class="fas fa-share-square"
               style="cursor: pointer; font-size: 20px; margin-left: 10px; margin-bottom: 0px;"
             ></i>
           </div>
@@ -234,6 +234,7 @@
       const messageInp = $('#messageInp')
       const fileUploader = $('#fileUploader')
       const imageUploader = $('#imageUploader')
+      const pipBtn = $('#share-square')
 
       // Remote Call
       const remoteRecord = $('#remote-record')
@@ -333,24 +334,9 @@
           dataChannel.onopen = e => {
             console.log('Channel is open')
             dataChannel.send('已連線開始聊天吧...')
-            calleeConnectedView()
+            connectedView()
           }
-          dataChannel.onclose = e => {
-            if (e.type == 'close') {
-              socket.emit('close call', caller)
-              caller.name = ''
-              caller.call_num = ''
-              caller.connected = false
-              userCallState.text('尚未有任何通話')
-              closeConnectedBtn.css({
-                display: 'none'
-              })
-              chatBorder.html('')
-              if (phoneCallStream.getAudioTracks().length) {
-                phoneCallStream.getAudioTracks().forEach(track => track.stop())
-              }
-            }
-          }
+          dataChannel.onclose = hangup
           dataChannel.addEventListener('message', e => {
             const { data } = e
             if (data === '已連線開始聊天吧...') {
@@ -380,6 +366,10 @@
               const audioTracks = phoneCallStream.getAudioTracks()
               if (audioTracks.length > 0) {
                 console.log(`Using Audio device: ${audioTracks[0].label}`)
+              }
+              const videoTracks = phoneCallStream.getVideoTracks()
+              if (videoTracks.length > 0) {
+                console.log(`Using Audio device: ${videoTracks[0].label}`)
               }
               phoneCallStream
                 .getTracks()
@@ -500,27 +490,10 @@
           caller.connected = true
           dataChannel.send('已連線開始聊天吧...')
           $('#call-out-modal').modal('hide')
-          callerConnectedView()
+          connectedView()
         }
-        dataChannel.onclose = e => {
-          if (e.type == 'close') {
-            socket.emit('close call', caller)
-            caller.name = ''
-            caller.call_num = ''
-            caller.connected = false
-            userCallState.text('尚未有任何通話')
-            closeConnectedBtn.css({
-              display: 'none'
-            })
-            chatBorder.html('')
-            if (phoneCallStream.getAudioTracks().length) {
-              phoneCallStream.getAudioTracks().forEach(track => track.stop())
-            }
-          }
-        }
-        dataChannel.addEventListener('message', e => {
-          handleMessage(e)
-        })
+        dataChannel.onclose = hangup
+        dataChannel.addEventListener('message', handleMessage)
         console.log('--- 開始建立連線 ---')
         pc.addEventListener('iceconnectionstatechange', e => {})
         pc.addEventListener('icecandidate', async e => {
@@ -534,7 +507,7 @@
         })
         pc.addEventListener('negotiationneeded', async () => {
           console.log('--- 建立 offer description ---')
-          const constraints = { audio: true }
+          const constraints = { audio: true, video: true }
           navigator.mediaDevices
             .getUserMedia(constraints)
             .then(async function(stream) {
@@ -687,55 +660,6 @@
           }
         })
       })
-      /**
-       * 直接傳送說話
-       * */
-      let phoneCallOn = false
-      remotePhoneCall.on('click', () => {
-        if (recordOn && phoneCallOn) return
-        if (!caller.connected) return
-        if (phoneCallOn) {
-          phoneCallStream.getAudioTracks()[0].stop()
-          phoneCallOn = false
-          return
-        }
-        phoneCallOn = true
-        const constraints = { audio: true }
-        navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
-          // phoneCallStream = stream
-          // const audioTracks = phoneCallStream.getAudioTracks()
-          // if (audioTracks.length > 0) {
-          //   console.log(`Using Audio device: ${audioTracks[0].label}`)
-          // }
-          // phoneCallStream
-          //   .getTracks()
-          //   .forEach(track => pc.addTrack(track, phoneCallStream))
-          // const audioContext = new AudioContext()
-          // const channels = 2
-          // const frameCount = audioContext.sampleRate * 2.0
-          // const analyser = audioContext.createAnalyser()
-          // analyser.fftSize = 1024
-          // const bufferLength = analyser.frequencyBinCount
-          // const dataArray = new Uint8Array(bufferLength)
-          // const mediaStreamSource = audioContext.createMediaStreamSource(stream)
-          // mediaStreamSource.connect(analyser)
-          function getRecord() {
-            // const myArrayBuffer = audioContext.createBuffer(
-            //   2,
-            //   frameCount,
-            //   audioContext.sampleRate
-            // )
-            // var source = audioContext.createBufferSource()
-            // source.buffer = myArrayBuffer
-            // source.connect(audioContext.destination)
-            // source.start()
-            // analyser.getByteFrequencyData(dataArray)
-            // dataChannel.send(`phoneCallUploadData::${dataArray}`)
-            // if (phoneCallOn) requestAnimationFrame(getRecord)
-          }
-          // requestAnimationFrame(getRecord)
-        })
-      })
       sendBtn.on('click', () => {
         if (!caller.connected) return
         const message = messageInp.val()
@@ -784,29 +708,36 @@
           }
         })
       })
+      pipBtn.on('click', _ => {
+        callinVideo.requestPictureInPicture()
+      })
       // 連接後的畫面
-      function callerConnectedView() {
+      function connectedView() {
         userCallState.text(`與${caller.name}(${caller.call_num})通話中`)
-        // 斷開連線
         audioPauseBtn.css({ display: 'block' })
         closeConnectedBtn.css({ display: 'block' }).one('click', () => {
           pc.close()
-          if (phoneCallOn) {
-            phoneCallOn = false
-            phoneCallStream.getAudioTracks()[0].stop()
-          }
         })
       }
-      function calleeConnectedView() {
-        userCallState.text(`與${caller.name}(${caller.call_num})通話中`)
-        audioPauseBtn.css({ display: 'block' })
-        closeConnectedBtn.css({ display: 'block' }).one('click', () => {
-          pc.close()
-          if (phoneCallOn) {
-            phoneCallOn = false
-            phoneCallStream.getAudioTracks()[0].stop()
+      // 斷開連線
+      function hangup(e) {
+        if (e.type == 'close') {
+          socket.emit('close call', caller)
+          caller.name = ''
+          caller.call_num = ''
+          caller.connected = false
+          userCallState.text('尚未有任何通話')
+          closeConnectedBtn.css({
+            display: 'none'
+          })
+          chatBorder.html('')
+          if (phoneCallStream.getAudioTracks().length) {
+            phoneCallStream.getAudioTracks().forEach(track => track.stop())
           }
-        })
+          if (phoneCallStream.getVideoTracks().length) {
+            phoneCallStream.getVideoTracks().forEach(track => track.stop())
+          }
+        }
       }
     </script>
   </body>
