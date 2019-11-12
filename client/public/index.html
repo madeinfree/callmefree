@@ -84,11 +84,20 @@
       <h3 style="display: none;" id="user-call-state" class="text-center">
         尚未有任何通話
       </h3>
-      <span id="close-connected-btn" style="display: none;">
-        <button class="btn btn-danger">
-          結束通話
-        </button>
-      </span>
+      <button
+        id="close-connected-btn"
+        class="btn btn-danger"
+        style="display: none;"
+      >
+        結束通話
+      </button>
+      <button
+        id="audio-pause-btn"
+        class="btn btn-danger"
+        style="display: none;"
+      >
+        靜音
+      </button>
       <div
         id="call-in-modal"
         class="modal fade bd-example-modal-sm"
@@ -129,6 +138,7 @@
       </div>
     </div>
     <div id="chat"></div>
+    <video id="callin-video"></video>
     <div>
       <div style="background-color: white; width: 100%;" id="operator">
         <div>
@@ -211,10 +221,12 @@
       const userCallState = $('#user-call-state')
       const closeConnectedBtn = $('#close-connected-btn')
       const onCallBtn = $('#on-call-btn')
+      const audioPauseBtn = $('#audio-pause-btn')
 
       // Incomming Call
       const callinAudio = $('#callin-audio')[0]
       const callinPhone = $('#callin-phone')[0]
+      const callinVideo = $('#callin-video')[0]
 
       // Message board
       const chatBorder = $('#chat')
@@ -245,7 +257,7 @@
         }
       })
       function socketConnect() {
-        socket = io('wss://4f39f6a4.ngrok.io')
+        socket = io('ws://localhost:52991')
         socket.on('user leave', msg => {
           const { name, call_num, email } = msg
           const userList = userListContent.querySelectorAll('.user-list')
@@ -313,10 +325,10 @@
             id: 0
           })
           pc.ontrack = e => {
-            if (callinPhone.srcObject !== e.streams[0]) {
-              callinPhone.srcObject = e.streams[0]
+            if (callinVideo.srcObject !== e.streams[0]) {
+              callinVideo.srcObject = e.streams[0]
             }
-            callinPhone.play()
+            callinVideo.play()
           }
           dataChannel.onopen = e => {
             console.log('Channel is open')
@@ -360,7 +372,7 @@
             }
           })
           await pc.setRemoteDescription(offer)
-          const constraints = { audio: true }
+          const constraints = { audio: true, video: true }
           navigator.mediaDevices
             .getUserMedia(constraints)
             .then(async function(stream) {
@@ -372,10 +384,7 @@
               phoneCallStream
                 .getTracks()
                 .forEach(track => pc.addTrack(track, phoneCallStream))
-              const answer = await pc.createAnswer({
-                answerToReceiveAudio: 1,
-                answerToReceiveVideo: 0
-              })
+              const answer = await pc.createAnswer()
               await pc.setLocalDescription(answer)
               socket.emit('PC:send answer to offer', {
                 answer,
@@ -394,7 +403,7 @@
         try {
           const response = await axios({
             method: 'POST',
-            url: 'https://4f39f6a4.ngrok.io/login',
+            url: 'http://localhost:52991/login',
             data: {
               email: emailForm.value,
               password: passwordForm.value
@@ -426,7 +435,7 @@
         try {
           const response = await axios({
             method: 'GET',
-            url: 'https://4f39f6a4.ngrok.io/users'
+            url: 'http://localhost:52991/users'
           })
           const users = response.data
           const ulElm = document.createElement('ul')
@@ -481,7 +490,10 @@
           id: 0
         })
         pc.ontrack = e => {
-          console.log(e)
+          if (callinVideo.srcObject !== e.streams[0]) {
+            callinVideo.srcObject = e.streams[0]
+          }
+          callinVideo.play()
         }
         dataChannel.onopen = e => {
           console.log('Channel is open')
@@ -536,7 +548,7 @@
                 .forEach(track => pc.addTrack(track, phoneCallStream))
               const offer = await pc.createOffer({
                 offerToReceiveAudio: 1,
-                offerToReceiveVideo: 0
+                offerToReceiveVideo: 1
               })
               console.log('--- 配置 local description ---')
               await pc.setLocalDescription(offer)
@@ -632,6 +644,12 @@
         chatBorder.scrollTop(999999)
       }
       /**
+       * 靜音
+       * */
+      audioPauseBtn.on('click', () => {
+        callinPhone.pause()
+      })
+      /**
        * 開始傳送錄音，必須啟動麥克風權限
        */
       let recordOn = false,
@@ -645,7 +663,7 @@
           return
         }
         if (!caller.connected) return
-        const constraints = { audio: true }
+        const constraints = { audio: true, video: true }
         navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
           recordStream = stream
           recordOn = true
@@ -770,6 +788,7 @@
       function callerConnectedView() {
         userCallState.text(`與${caller.name}(${caller.call_num})通話中`)
         // 斷開連線
+        audioPauseBtn.css({ display: 'block' })
         closeConnectedBtn.css({ display: 'block' }).one('click', () => {
           pc.close()
           if (phoneCallOn) {
@@ -780,6 +799,7 @@
       }
       function calleeConnectedView() {
         userCallState.text(`與${caller.name}(${caller.call_num})通話中`)
+        audioPauseBtn.css({ display: 'block' })
         closeConnectedBtn.css({ display: 'block' }).one('click', () => {
           pc.close()
           if (phoneCallOn) {
